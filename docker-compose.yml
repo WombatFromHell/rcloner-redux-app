@@ -1,0 +1,18 @@
+services:
+  rclone:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HOST_UID: ${HOST_UID}
+        HOST_GID: ${HOST_UID}
+        TZ: ${TZ}
+    image: ${IMAGENAME}:latest
+    restart: unless-stopped
+    volumes:
+      - ${APPROOT}/app/logs:/app/logs
+      - ${APPROOT}/app/locks:/app/locks
+      - ${APPROOT}/app/rclone:/app/rclone
+      - ${APPROOT}/app/cache:/app/.cache/rclone
+      - ${APPROOT}/app/sync.conf:/app/sync.conf
+      - ${SYNCTARGET}:/synctarget

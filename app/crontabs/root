@@ -1,0 +1,2 @@
+# once --first-run has been run successfully uncomment the following
+# */15 * * * * /app/sync_task.sh

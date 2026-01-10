@@ -1,0 +1,6 @@
+locks
+logs
+rclone/filters.md5
+app/cache
+app/rclone/rclone.conf
+.env
