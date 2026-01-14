@@ -61,7 +61,7 @@ build_container() {
     --build-arg HOST_UID="${HOST_UID}" \
     --build-arg HOST_GID="${HOST_GID}" \
     --build-arg TZ="${TZ}" \
-    -t "${IMAGENAME}:latest" .; then
+    -t "${IMAGENAME}:${VERSION}" .; then
     return 0 # success
   else
     echo "Error: Failed to build container" >&2
@@ -87,7 +87,7 @@ run_container() {
     -v "${APPROOT}"/rclone:/app/rclone \
     -v "${APPROOT}"/sync.conf:/app/sync.conf \
     -v "${SYNCTARGET}":/synctarget \
-    "${IMAGENAME}:latest"; then
+    "${IMAGENAME}:${VERSION}"; then
     return 0 # success
   else
     echo "Error: Failed to run container" >&2
