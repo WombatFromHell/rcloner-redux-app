@@ -1,5 +1,7 @@
 services:
-  rclone:
+  rcloner:
+    env_file:
+      - compose.env
     build:
       context: .
       dockerfile: Dockerfile
@@ -8,6 +10,7 @@ services:
         HOST_GID: ${HOST_UID}
         TZ: ${TZ}
     image: ${IMAGENAME}:${VERSION}
+    container_name: rcloner
     pull_policy: never
     restart: unless-stopped
     volumes:

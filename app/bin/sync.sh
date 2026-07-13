@@ -266,7 +266,7 @@ build_rclone_command() {
   # Add common bisync options
   cmd+=(
     "--config" "$RCLONE_FILE"
-    "--filters-file" "$FILTER_FILE"
+    "--filter-from" "$FILTER_FILE"
     "--compare" "size,modtime,checksum"
     "--resilient"
     "--recover"

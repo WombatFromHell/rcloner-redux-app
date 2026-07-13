@@ -1,6 +1,7 @@
 locks
 logs
-rclone/filters.md5
 app/cache
 app/rclone/rclone.conf
+app/rclone/filters.md5
 .env
+compose.env
