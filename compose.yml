@@ -5,10 +5,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        HOST_UID: ${HOST_UID}
-        HOST_GID: ${HOST_UID}
-        TZ: ${TZ}
     image: ${IMAGENAME}:${VERSION}
     container_name: rcloner
     pull_policy: never

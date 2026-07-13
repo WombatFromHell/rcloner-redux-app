@@ -2,8 +2,8 @@
 
 SCRIPT_PATH="/app/sync.sh"
 
-HOST_UID=${HOST_UID:-1000}
-USERNAME=$(getent passwd "${HOST_UID}" | cut -d: -f1)
+PUID=${PUID:-1000}
+USERNAME=$(getent passwd "${PUID}" | cut -d: -f1)
 
 detect_su() {
   local su_bin

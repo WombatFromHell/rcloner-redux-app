@@ -5,3 +5,6 @@ app/rclone/rclone.conf
 app/rclone/filters.md5
 .env
 compose.env
+
+app/crontabs/**
+!app/crontabs/appuser.example

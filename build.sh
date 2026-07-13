@@ -57,11 +57,7 @@ parse_arguments() {
 build_container() {
   # Build the Docker image
   echo "Building container..."
-  if docker build \
-    --build-arg HOST_UID="${HOST_UID}" \
-    --build-arg HOST_GID="${HOST_GID}" \
-    --build-arg TZ="${TZ}" \
-    -t "${IMAGENAME}:${VERSION}" .; then
+  if docker build -t "${IMAGENAME}:${VERSION}" .; then
     return 0 # success
   else
     echo "Error: Failed to build container" >&2
