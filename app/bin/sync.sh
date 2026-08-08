@@ -4,18 +4,39 @@ set -euo pipefail
 # Unified rclone sync script - combines first-run and regular sync functionality
 #
 
-# Default configuration file path
-CONFIG_FILE="${CONFIG_FILE:-/app/sync.conf}"
+# shellcheck disable=SC1091
+[[ -f /app/user-secrets.sh ]] && source /app/user-secrets.sh
 
-# Load configuration from file if it exists
-load_configuration() {
-  if [[ -f "$CONFIG_FILE" ]]; then # shellcheck disable=SC1090
-    # Source the configuration file
-    source "$CONFIG_FILE"
-  else
-    echo "Configuration file not found: $CONFIG_FILE" >&2
-    echo "Using default values or environment variables." >&2
+# Load per-user settings from prefixed env vars (compose.env).
+load_user_config() {
+  if [[ -z "${USER:-}" ]]; then
+    return 0
   fi
+  REMOTE="${REMOTE:-${USER}}"
+  load_user_secrets "$USER" "$REMOTE"
+  local upuser="${USER^^}" rup="${REMOTE^^}"
+  local src_var="${upuser}_SRC_DIR"
+  local tgt_var="${upuser}_TGT_DIR"
+  local filter_var="${upuser}_FILTER_FILE"
+  SRC_DIR="${!src_var:-/synctarget/${USER}}"
+  TGT_DIR="${!tgt_var:-${REMOTE}:/Backups}"
+  LOG_DIR="/app/logs/${USER}"
+  LOCK_DIR="/app/locks/${USER}"
+  FILTER_FILE="${!filter_var:-/app/rclone/filters-${USER}}"
+  # Fall back to the shared filter file if the per-user one doesn't exist
+  [[ -f "$FILTER_FILE" ]] || FILTER_FILE="/app/rclone/filters"
+  # Per-remote extra flags (RCLONE_OPTS in the secrets file); keyed by remote
+  # name so flags follow the remote, not the username.
+  RCLONE_REMOTE="${RCLONE_REMOTE:-${rup}}"
+  # --remote was explicit ⇒ config for that remote must have loaded (secrets
+  # file or env vars); fail loudly instead of a cryptic rclone error later.
+  if [[ "${REMOTE_SET:-}" == true && ! -v "RCLONE_CONFIG_${RCLONE_REMOTE}_TYPE" ]]; then
+    echo "ERROR: no RCLONE_CONFIG_${RCLONE_REMOTE}_* loaded — check /run/secrets/${USER}-${REMOTE} is present and readable" >&2
+    exit 1
+  fi
+  local opts_var="${RCLONE_REMOTE}_RCLONE_OPTS"
+  RCLONE_OPTS="${!opts_var:-}"
+  export RCLONE_CACHE_DIR="/app/.cache/rclone/${USER}"
 }
 
 # Validate critical configuration variables
@@ -24,9 +45,7 @@ validate_configuration() {
   local critical_vars=(
     "BASE_DIR"
     "CONFIG_DIR"
-    "RCLONE_FILE"
     "LOG_DIR"
-    "FILTER_FILE"
     "SRC_DIR"
     "TGT_DIR"
     "LOCK_DIR"
@@ -56,36 +75,37 @@ validate_configuration() {
   return 0
 }
 
-# Load configuration
-load_configuration
+# Apply env defaults and validate. Runs in main() after --user is parsed.
+load_config() {
+  load_user_config
 
-# Apply environment variable overrides with defaults
-BASE_DIR="${BASE_DIR:-/app}"
-CONFIG_DIR="${CONFIG_DIR:-${BASE_DIR}/rclone}"
-RCLONE_FILE="${RCLONE_FILE:-${CONFIG_DIR}/rclone.conf}"
-LOG_DIR="${LOG_DIR:-/app/logs}"
-FILTER_FILE="${FILTER_FILE:-${CONFIG_DIR}/filters}"
-SRC_DIR="${SRC_DIR:-/synctarget}"
-TGT_DIR="${TGT_DIR:-gdrive:/Backups}"
-LOCK_DIR="${LOCK_DIR:-${BASE_DIR}/locks}"
-INITIAL_LOCK="${INITIAL_LOCK:-${LOCK_DIR}/.initial_sync_lock}"
-INITIAL_DRY_LOCK="${INITIAL_DRY_LOCK:-${LOCK_DIR}/.initial_drysync_lock}"
-BISYNC_LOCK="${BISYNC_LOCK:-${LOCK_DIR}/.sync_lock}"
-INITIAL_SYNC_LOG="${INITIAL_SYNC_LOG:-${LOG_DIR}/initial-sync.log}"
-LOG_FILE="${LOG_FILE:-${LOG_DIR}/sync.log}"
-LOG_MAX_SIZE="${LOG_MAX_SIZE:-1048576}"
-LOG_MAX_BACKUPS="${LOG_MAX_BACKUPS:-3}"
+  BASE_DIR="${BASE_DIR:-/app}"
+  CONFIG_DIR="${CONFIG_DIR:-${BASE_DIR}/rclone}"
+  FILTER_FILE="${FILTER_FILE:-${CONFIG_DIR}/filters}"
+  SRC_DIR="${SRC_DIR:-/synctarget}"
+  TGT_DIR="${TGT_DIR:-gdrive:/Backups}"
+  LOG_DIR="${LOG_DIR:-/app/logs}"
+  LOCK_DIR="${LOCK_DIR:-${BASE_DIR}/locks}"
+  INITIAL_LOCK="${INITIAL_LOCK:-${LOCK_DIR}/.initial_sync_lock}"
+  INITIAL_DRY_LOCK="${INITIAL_DRY_LOCK:-${LOCK_DIR}/.initial_drysync_lock}"
+  BISYNC_LOCK="${BISYNC_LOCK:-${LOCK_DIR}/.sync_lock}"
+  INITIAL_SYNC_LOG="${INITIAL_SYNC_LOG:-${LOG_DIR}/initial-sync.log}"
+  LOG_FILE="${LOG_FILE:-${LOG_DIR}/sync.log}"
+  LOG_MAX_SIZE="${LOG_MAX_SIZE:-1048576}"
+  LOG_MAX_BACKUPS="${LOG_MAX_BACKUPS:-3}"
 
-# Validate configuration after applying defaults
-if ! validate_configuration; then
-  exit 1
-fi
+  if ! validate_configuration; then
+    exit 1
+  fi
+}
 
 # Global operation flags
 FIRST_RUN=false
 DRY_RUN=false
 FORCE=false
 INITIAL_DRY_RUN_COMPLETED=false
+DEDUP=false
+DEDUP_ARGS=()
 
 # Log rotation configuration
 LOG_MAX_SIZE="${LOG_MAX_SIZE:-1048576}" # 1MiB default
@@ -97,12 +117,18 @@ show_usage() {
   script_name="$(basename "$0")"
 
   cat <<EOF
-Usage: ${script_name} [--first-run] [--safe|--dry-run] [--force]
+Usage: ${script_name} [--user NAME] [--remote NAME] [--first-run] [--safe|--dry-run] [--force] [--dedup [RCLONE FLAGS...]]
 
 Options:
+  --user NAME    Sync for this user (uses <NAME>_* env vars; required for multi-user)
+  --remote NAME  Remote to sync (default: the username). Selects the
+                 /run/secrets/<user>-<remote> secrets file.
   --first-run    Perform initial sync (NOTE: requires dry-run first, then re-run for initial sync)
   --safe, --dry-run  Perform dry run (no changes made)
   --force        Force sync (overwrite conflicts)
+  --dedup        Run 'rclone dedupe' on TGT_DIR instead of bisync. Must be the
+                 last option; everything after it is passed to rclone verbatim,
+                 e.g. --dedup --fast-list --dedupe-mode newest.
   --help         Show this help message
 EOF
 }
@@ -111,6 +137,15 @@ EOF
 parse_arguments() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+    --user)
+      USER="$2"
+      shift 2
+      ;;
+    --remote)
+      REMOTE="$2"
+      REMOTE_SET=true
+      shift 2
+      ;;
     --first-run)
       FIRST_RUN=true
       shift
@@ -122,6 +157,12 @@ parse_arguments() {
     --force)
       FORCE=true
       shift
+      ;;
+    --dedup)
+      DEDUP=true
+      shift
+      DEDUP_ARGS=("$@")
+      break
       ;;
     --help)
       show_usage
@@ -186,7 +227,7 @@ create_bisync_lock() {
 # This file ensures that normal bisync operations only run after successful first-run
 CREATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SOURCE_PATH=$SRC_DIR
-DEST_PATH=gdrive:/
+DEST_PATH=$TGT_DIR
 SYNC_TYPE=bisync
 EOF
 
@@ -206,7 +247,9 @@ get_log_file() {
 get_sync_description() {
   local description=""
 
-  if [[ "$FIRST_RUN" == true ]]; then
+  if [[ "$DEDUP" == true ]]; then
+    description="dedup"
+  elif [[ "$FIRST_RUN" == true ]]; then
     if [[ "$INITIAL_DRY_RUN_COMPLETED" == true ]]; then
       description="initial dry-run"
     else
@@ -254,7 +297,8 @@ detect_rclone() {
 # Build rclone bisync command
 build_rclone_command() {
   local rclone_bin="$1"
-  local cmd=("$rclone_bin" --config "$RCLONE_FILE" bisync)
+  # ponytail: no --config here — remotes come from RCLONE_CONFIG_* env vars
+  local cmd=("$rclone_bin" bisync)
 
   # Add operation mode flags
   if [[ "$DRY_RUN" == true ]]; then
@@ -265,8 +309,6 @@ build_rclone_command() {
 
   # Add common bisync options
   cmd+=(
-    "--config" "$RCLONE_FILE"
-    "--filter-from" "$FILTER_FILE"
     "--compare" "size,modtime,checksum"
     "--resilient"
     "--recover"
@@ -276,6 +318,18 @@ build_rclone_command() {
     "--drive-acknowledge-abuse"
     "-Mv"
   )
+
+  # Only apply a filter file when one actually exists
+  if [[ -n "${FILTER_FILE:-}" && -f "$FILTER_FILE" ]]; then
+    cmd+=("--filter-from" "$FILTER_FILE")
+  fi
+
+  # Append per-remote extra flags (RCLONE_OPTS in the secrets file)
+  if [[ -n "${RCLONE_OPTS:-}" ]]; then
+    local -a extra_opts=()
+    read -ra extra_opts <<< "$RCLONE_OPTS"
+    cmd+=("${extra_opts[@]}")
+  fi
 
   # Add resync flag for first-run
   if [[ "$FIRST_RUN" == true ]]; then
@@ -316,6 +370,28 @@ execute_sync() {
 
   if ! eval "$cmd" 2>&1 | tee -a "$log_file"; then
     echo "Sync failed! Check logs at: $log_file"
+    return 1
+  fi
+
+  return 0
+}
+
+# Run rclone dedupe on the remote path (TGT_DIR), passing through the flags
+# given after --dedup. No first-run/bisync locks involved; TGT_DIR is the
+# target. ponytail: SRC_DIR dedup isn't supported — add a flag if ever needed.
+execute_dedup() {
+  local rclone_bin="$1"
+  local log_file
+  log_file="$(get_log_file)"
+
+  local cmd=("$rclone_bin" dedupe)
+  if [[ "$DRY_RUN" == true ]]; then
+    cmd+=("--dry-run")
+  fi
+  cmd+=("$TGT_DIR" "${DEDUP_ARGS[@]}")
+
+  if ! "${cmd[@]}" 2>&1 | tee -a "$log_file"; then
+    echo "Dedup failed! Check logs at: $log_file"
     return 1
   fi
 
@@ -423,10 +499,14 @@ main() {
   # Parse command line arguments
   parse_arguments "$@"
 
-  # Validate requirements based on operation mode
+  # Load configuration (--user aware)
+  load_config
+
+  # Validate requirements based on operation mode. Dedup bypasses the
+  # first-run/bisync state entirely — it's a remote-side cleanup, not a sync.
   if [[ "$FIRST_RUN" == true ]]; then
     validate_first_run
-  else
+  elif [[ "$DEDUP" != true ]]; then
     validate_regular_sync
   fi
 
@@ -438,13 +518,18 @@ main() {
   # Initialize logging
   initialize_logging
 
-  # Execute the sync
-  if ! execute_sync "$rclone_bin"; then
-    exit 1
+  # Execute the sync (or dedup)
+  if [[ "$DEDUP" == true ]]; then
+    if ! execute_dedup "$rclone_bin"; then
+      exit 1
+    fi
+  else
+    if ! execute_sync "$rclone_bin"; then
+      exit 1
+    fi
+    # Handle completion
+    handle_completion
   fi
-
-  # Handle completion
-  handle_completion
 }
 
 # Run main function with all arguments

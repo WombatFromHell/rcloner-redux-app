@@ -3,8 +3,9 @@ logs
 app/cache
 app/rclone/rclone.conf
 app/rclone/filters.md5
+app/rclone/filters-*
 .env
 compose.env
+secrets/*
+!secrets/*.example
 
-app/crontabs/**
-!app/crontabs/appuser.example

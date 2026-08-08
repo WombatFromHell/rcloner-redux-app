@@ -77,11 +77,12 @@ run_container() {
   mkdir -p "${FOLDERS[@]}"
 
   if docker run -d --rm --name "${IMAGENAME}" \
+    --env-file compose.env \
+    -v "${APPROOT}"/secrets:/run/secrets:ro \
     -v "${APPROOT}"/logs:/app/logs \
     -v "${APPROOT}"/locks:/app/locks \
     -v "${APPROOT}"/cache:/app/.cache/rclone \
     -v "${APPROOT}"/rclone:/app/rclone \
-    -v "${APPROOT}"/sync.conf:/app/sync.conf \
     -v "${SYNCTARGET}":/synctarget \
     "${IMAGENAME}:${VERSION}"; then
     return 0 # success

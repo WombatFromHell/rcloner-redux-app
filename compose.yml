@@ -9,10 +9,14 @@ services:
     container_name: rcloner
     pull_policy: never
     restart: unless-stopped
+    labels:
+      - com.getarcaneapp.arcane.updater=false
     volumes:
+      # One KEY=VAL file per user (see secrets/*.example), named after the
+      # username. Mounted read-only so tokens never appear in `docker inspect`.
+      - ${APPROOT}/secrets:/run/secrets:ro
       - ${APPROOT}/app/logs:/app/logs
       - ${APPROOT}/app/locks:/app/locks
       - ${APPROOT}/app/rclone:/app/rclone
       - ${APPROOT}/app/cache:/app/.cache/rclone
-      - ${APPROOT}/app/sync.conf:/app/sync.conf
-      - ${SYNCTARGET}:/synctarget
+      - ${SYNCTARGET1}:/synctarget1
