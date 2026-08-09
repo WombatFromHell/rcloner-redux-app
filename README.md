@@ -94,3 +94,13 @@ To deduplicate the remote side, run
 
 - Sync logs: `app/logs/<user>/sync.log` (rotated via `LOG_MAX_SIZE`/`LOG_MAX_BACKUPS`).
 - Cron daemon log: `app/logs/crond.log` — check here if a job is not firing.
+
+### Healthcheck
+
+Each sync run writes a state file at `app/logs/<user>/.healthcheck-<remote>`
+(`STATUS=degraded` on failure, `STATUS=healthy` on success, plus `LAST_RUN`).
+The container's healthcheck runs `/app/healthcheck.sh`: it marks the container
+unhealthy if any file is degraded **or** stale (no run for `HEALTH_MAX_AGE`
+seconds, default 7200 — raise it for crons slower than the default 15 min),
+which catches a sync that silently stopped. Absent files (never run / disabled
+remote) count as healthy.

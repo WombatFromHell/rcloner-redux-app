@@ -9,9 +9,10 @@ RUN echo "https://dl-cdn.alpinelinux.org/alpine/latest-stable/community" >> /etc
 COPY ./app/bin/entrypoint.sh /app/entrypoint.sh
 COPY ./app/bin/sync.sh /app/
 COPY ./app/bin/user-secrets.sh /app/
+COPY ./app/bin/healthcheck.sh /app/healthcheck.sh
 
 RUN chmod 0755 /app/entrypoint.sh && \
-  chmod 0755 /app/sync.sh /app/user-secrets.sh
+  chmod 0755 /app/sync.sh /app/user-secrets.sh /app/healthcheck.sh
 
 # stay root at runtime — entrypoint creates per-user accounts and crontabs,
 # and crond must run as root to switch to each user's job identity

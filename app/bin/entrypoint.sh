@@ -91,7 +91,12 @@ for user in ${USERS:-}; do
       # configs. Falsy is 0/false (case-insensitive); absent defaults to enabled.
       enabled_var="${remote^^}_ENABLED"
       enabled="${!enabled_var:-1}"
-      [[ "${enabled,,}" == 0 || "${enabled,,}" == false ]] && continue
+      [[ "${enabled,,}" == 0 || "${enabled,,}" == false ]] && {
+        # A disabled remote's stale healthcheck would false-positive the
+        # container healthcheck; drop it at start.
+        rm -f "/app/logs/${user}/.healthcheck-${remote}"
+        continue
+      }
       cron_var="${remote^^}_CRON"
       printf '%s /app/sync.sh --user %s --remote %s\n' "${!cron_var:-${user_cron}}" "${user}" "${remote}" >> "/etc/crontabs/${user}"
     done

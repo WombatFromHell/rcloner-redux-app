@@ -398,6 +398,15 @@ execute_dedup() {
   return 0
 }
 
+# Persist run status so the container healthcheck can surface failures.
+# One file per <user>-<remote>; STATUS is degraded on failure / healthy on
+# success, LAST_RUN drives the staleness guard (sync silently stopped).
+# ponytail: main sync only — dedup is manual, no healthcheck there.
+write_healthcheck() {
+  printf 'STATUS=%s\nLAST_RUN=%s\n' "$1" "$(date +%s)" >"${LOG_DIR}/.healthcheck-${RCLONE_REMOTE}"
+  echo "Healthcheck: $1" >>"$(get_log_file)"
+}
+
 # Handle post-sync completion
 handle_completion() {
   local log_file
@@ -525,10 +534,12 @@ main() {
     fi
   else
     if ! execute_sync "$rclone_bin"; then
+      write_healthcheck degraded
       exit 1
     fi
     # Handle completion
     handle_completion
+    write_healthcheck healthy
   fi
 }
 

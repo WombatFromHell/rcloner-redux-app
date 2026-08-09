@@ -11,6 +11,14 @@ services:
     restart: unless-stopped
     labels:
       - com.getarcaneapp.arcane.updater=false
+    healthcheck:
+      # Unhealthy if any sync pipeline is degraded or its healthcheck file is
+      # stale (sync silently stopped). See /app/healthcheck.sh.
+      test: ["CMD", "/app/healthcheck.sh"]
+      interval: 5m
+      timeout: 5s
+      retries: 2
+      start_period: 30s
     volumes:
       # One KEY=VAL file per user (see secrets/*.example), named after the
       # username. Mounted read-only so tokens never appear in `docker inspect`.
